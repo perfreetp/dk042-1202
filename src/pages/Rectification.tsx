@@ -250,13 +250,7 @@ export default function Rectification() {
                   className="btn-warning"
                   onClick={() => {
                     setShowSubmit(true);
-                    if (selectedTask) {
-                      submitRectification(
-                        selectedTask.id,
-                        selectedTask.rectificationContent || "开始整改"
-                      );
-                    }
-                    setSelectedTask(null);
+                    setSubmitContent("");
                   }}
                 >
                   <Play size={14} />

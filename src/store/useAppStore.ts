@@ -41,6 +41,9 @@ interface AppState {
   confirmMatch: (matchId: string, standardFieldId: string) => void;
   rejectMatch: (matchId: string) => void;
 
+  startRectification: (rectId: string) => void;
+  submitRectification: (rectId: string, content: string) => void;
+
   markFalsePositive: (issueIds: string[]) => void;
   assignRectification: (
     issueIds: string[],
@@ -110,17 +113,31 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => {
       const match = state.matchResults.find((m) => m.id === matchId);
       if (!match) return state;
+      const field = state.fields.find((f) => f.id === match.fieldId);
+      if (!field) return state;
+      const taskId = field.taskId;
+
       const updatedMatches = state.matchResults.map((m) =>
         m.id === matchId
           ? { ...m, standardFieldId, status: "confirmed" as const }
           : m
       );
+
+      const taskFieldIds = state.fields
+        .filter((f) => f.taskId === taskId)
+        .map((f) => f.id);
       const confirmedCount = updatedMatches.filter(
-        (m) => m.status === "confirmed" && m.fieldId
+        (m) => m.status === "confirmed" && taskFieldIds.includes(m.fieldId)
       ).length;
-      const task = state.fields.find((f) => f.id === match.fieldId)?.taskId;
+
       const updatedTasks = state.tasks.map((t) =>
-        t.id === task ? { ...t, matchedCount: confirmedCount, updatedAt: new Date().toISOString().replace("T", " ").slice(0, 19) } : t
+        t.id === taskId
+          ? {
+              ...t,
+              matchedCount: confirmedCount,
+              updatedAt: new Date().toISOString().replace("T", " ").slice(0, 19),
+            }
+          : t
       );
       return { matchResults: updatedMatches, tasks: updatedTasks };
     });
@@ -135,13 +152,37 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   markFalsePositive: (issueIds) => {
-    set((state) => ({
-      issues: state.issues.map((i) =>
+    set((state) => {
+      const updatedIssues = state.issues.map((i) =>
         issueIds.includes(i.id)
           ? { ...i, status: "false_positive" as const }
           : i
-      ),
-    }));
+      );
+
+      const affectedTaskIds = [
+        ...new Set(
+          issueIds
+            .map((id) => state.issues.find((i) => i.id === id)?.taskId)
+            .filter(Boolean)
+        ),
+      ] as string[];
+
+      const updatedTasks = state.tasks.map((t) => {
+        if (!affectedTaskIds.includes(t.id)) return t;
+        const activeCount = updatedIssues.filter(
+          (i) =>
+            i.taskId === t.id &&
+            (i.status === "open" || i.status === "rectifying")
+        ).length;
+        return {
+          ...t,
+          issueCount: activeCount,
+          updatedAt: new Date().toISOString().replace("T", " ").slice(0, 19),
+        };
+      });
+
+      return { issues: updatedIssues, tasks: updatedTasks };
+    });
   },
 
   assignRectification: (issueIds, assignee, deadline) => {
@@ -171,6 +212,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         issues: updatedIssues,
       };
     });
+  },
+
+  startRectification: (rectId) => {
+    const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+    set((state) => ({
+      rectificationTasks: state.rectificationTasks.map((r) =>
+        r.id === rectId
+          ? {
+              ...r,
+              status: "in_progress" as const,
+            }
+          : r
+      ),
+    }));
   },
 
   submitRectification: (rectId, content) => {
@@ -211,7 +266,27 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? { ...i, status: "rectifying" as const }
           : i
       );
-      return { rectificationTasks: updatedRects, issues: updatedIssues };
+
+      const activeCount = updatedIssues.filter(
+        (i) =>
+          i.taskId === rect.taskId &&
+          (i.status === "open" || i.status === "rectifying")
+      ).length;
+      const updatedTasks = state.tasks.map((t) =>
+        t.id === rect.taskId
+          ? {
+              ...t,
+              issueCount: activeCount,
+              updatedAt: now,
+            }
+          : t
+      );
+
+      return {
+        rectificationTasks: updatedRects,
+        issues: updatedIssues,
+        tasks: updatedTasks,
+      };
     });
   },
 
